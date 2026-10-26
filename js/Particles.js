@@ -7,6 +7,10 @@ const BOOST_PARTICLE_COLORS = [
 	new THREE.Color( 0xff4b1f ),
 	new THREE.Color( 0xff9f1c ),
 ];
+const AIR_CONTROL_PARTICLE_COLORS = [
+	new THREE.Color( 0x37b6ff ),
+	new THREE.Color( 0x9fe4ff ),
+];
 
 export class SmokeTrails {
 
@@ -31,6 +35,7 @@ export class SmokeTrails {
 
 		this.emitIndex = 0;
 		this.boostFxTime = 0;
+		this.airControlFxTime = 0;
 		this.customColor = null;
 
 	}
@@ -77,8 +82,10 @@ export class SmokeTrails {
 
 		this.boostFxTime = Math.max( 0, this.boostFxTime - dt );
 		const boostActive = this.boostFxTime > 0;
+		this.airControlFxTime = Math.max( 0, this.airControlFxTime - dt );
+		const airControlActive = this.airControlFxTime > 0;
 		const speedRatio = THREE.MathUtils.clamp( Math.abs( vehicle.linearSpeed || 0 ) / Math.max( 0.01, vehicle.topSpeed || 1 ), 0, 1.7 );
-		const shouldEmit = boostActive || ( speedRatio > 0.25 && vehicle.driftIntensity > 0.62 );
+		const shouldEmit = boostActive || airControlActive || ( speedRatio > 0.25 && vehicle.driftIntensity > 0.62 );
 
 		// Emit new particles from back wheel positions
 		if ( shouldEmit ) {
@@ -86,8 +93,15 @@ export class SmokeTrails {
 			this.emitFrame = ( this.emitFrame + 1 ) % this.emissionStride;
 			if ( this.emitFrame === 0 ) {
 
-				if ( vehicle.wheelBL ) this.emitAtWheel( vehicle.wheelBL, vehicle, boostActive );
-				if ( vehicle.wheelBR ) this.emitAtWheel( vehicle.wheelBR, vehicle, boostActive );
+				// Air Control pad: little blue flames from ALL four wheels.
+				if ( airControlActive ) {
+
+					if ( vehicle.wheelFL ) this.emitAtWheel( vehicle.wheelFL, vehicle, false, true );
+					if ( vehicle.wheelFR ) this.emitAtWheel( vehicle.wheelFR, vehicle, false, true );
+
+				}
+				if ( vehicle.wheelBL ) this.emitAtWheel( vehicle.wheelBL, vehicle, boostActive, airControlActive );
+				if ( vehicle.wheelBR ) this.emitAtWheel( vehicle.wheelBR, vehicle, boostActive, airControlActive );
 
 			}
 
@@ -143,7 +157,13 @@ export class SmokeTrails {
 
 	}
 
-	emitAtWheel( wheel, vehicle, boostActive = false ) {
+	triggerAirControlFx( duration = 1 ) {
+
+		this.airControlFxTime = Math.max( this.airControlFxTime, duration );
+
+	}
+
+	emitAtWheel( wheel, vehicle, boostActive = false, airControlActive = false ) {
 
 		const poolSize = Math.max( 1, Math.min( this.maxParticles, this.particles.length ) );
 		const p = this.particles[ this.emitIndex % poolSize ];
@@ -156,9 +176,11 @@ export class SmokeTrails {
 		p.sprite.position.copy( _worldPos );
 		p.sprite.visible = true;
 		p.sprite.material.opacity = 0;
-		const particleColor = boostActive
-			? BOOST_PARTICLE_COLORS[ Math.random() < 0.5 ? 0 : 1 ]
-			: ( this.customColor || DEFAULT_PARTICLE_COLOR );
+		const particleColor = airControlActive
+			? AIR_CONTROL_PARTICLE_COLORS[ Math.random() < 0.5 ? 0 : 1 ]
+			: ( boostActive
+				? BOOST_PARTICLE_COLORS[ Math.random() < 0.5 ? 0 : 1 ]
+				: ( this.customColor || DEFAULT_PARTICLE_COLOR ) );
 		p.sprite.material.color.copy( particleColor );
 
 		const speedRatio = THREE.MathUtils.clamp( Math.abs( vehicle.linearSpeed || 0 ) / Math.max( 0.01, vehicle.topSpeed || 1 ), 0, 1.7 );
@@ -178,6 +200,91 @@ export class SmokeTrails {
 		// Slightly longer at high speed for more readable trails
 		p.maxLife = 0.42 + ( speedRatio * 0.12 );
 		p.life = p.maxLife;
+
+	}
+
+}
+
+const SPLASH_PARTICLE_COLORS = [
+	new THREE.Color( 0xbfe8ff ),
+	new THREE.Color( 0x8fd4f7 ),
+	new THREE.Color( 0xe8f7ff ),
+];
+
+// Splash when a car dives into pool water: a burst of light-blue droplets
+// thrown up and outward, pulled down by gravity, fading as they fall.
+export class WaterSplashFX {
+
+	constructor( scene, options = {} ) {
+
+		this.scene = scene;
+		this.maxParticles = Math.max( 8, Math.floor( Number( options.maxParticles ) || 48 ) );
+		const map = new THREE.TextureLoader().load( 'sprites/smoke.png' );
+		this.baseMaterial = new THREE.SpriteMaterial( {
+			map,
+			transparent: true,
+			depthWrite: false,
+			opacity: 0.85,
+		} );
+		this.particles = [];
+		for ( let i = 0; i < this.maxParticles; i ++ ) {
+
+			const sprite = new THREE.Sprite( this.baseMaterial.clone() );
+			sprite.material.color.copy( SPLASH_PARTICLE_COLORS[ i % SPLASH_PARTICLE_COLORS.length ] );
+			sprite.visible = false;
+			this.scene.add( sprite );
+			this.particles.push( { sprite, life: 0, maxLife: 0, velocity: new THREE.Vector3(), gravity: 9 } );
+
+		}
+		this.emitIndex = 0;
+
+	}
+
+	// intensity 0..1 — gentle wading makes a small plop, a dive makes a proper splash.
+	burst( x, y, z, intensity = 1 ) {
+
+		const count = Math.floor( 8 + intensity * 22 );
+		for ( let i = 0; i < count; i ++ ) {
+
+			const particle = this.particles[ this.emitIndex ];
+			this.emitIndex = ( this.emitIndex + 1 ) % this.particles.length;
+			const angle = Math.random() * Math.PI * 2;
+			const horizontal = ( 0.9 + Math.random() * 1.6 ) * ( 0.55 + intensity * 0.9 );
+			particle.velocity.set(
+				Math.cos( angle ) * horizontal,
+				( 2.2 + Math.random() * 2.6 ) * ( 0.5 + intensity ),
+				Math.sin( angle ) * horizontal
+			);
+			particle.maxLife = 0.45 + Math.random() * 0.4;
+			particle.life = particle.maxLife;
+			particle.sprite.position.set( x + ( Math.random() - 0.5 ) * 0.3, y, z + ( Math.random() - 0.5 ) * 0.3 );
+			particle.sprite.scale.setScalar( 0.28 + Math.random() * 0.22 + intensity * 0.2 );
+			particle.sprite.material.opacity = 0.7 + intensity * 0.2;
+			particle.sprite.visible = true;
+
+		}
+
+	}
+
+	update( dt ) {
+
+		for ( const particle of this.particles ) {
+
+			if ( particle.life <= 0 ) continue;
+			particle.life -= dt;
+			if ( particle.life <= 0 ) {
+
+				particle.sprite.visible = false;
+				continue;
+
+			}
+			particle.velocity.y -= particle.gravity * dt;
+			particle.sprite.position.addScaledVector( particle.velocity, dt );
+			const t = particle.life / particle.maxLife;
+			particle.sprite.material.opacity = 0.8 * t;
+			particle.sprite.scale.multiplyScalar( 1 + dt * 0.9 );
+
+		}
 
 	}
 

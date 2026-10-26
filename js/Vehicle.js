@@ -31,7 +31,15 @@ export class Vehicle {
 		this.acceleration = 0;
 
 		this.spherePos = new THREE.Vector3( 3.5, 0.5, 5 );
+		// Physics sphere radius — resizes with the size pads (mini/mega). The
+		// car container always sits at the sphere's BOTTOM, so keeping this in
+		// sync keeps the GLB seated on the ground at any size.
+		this.hitboxRadius = 0.5;
 		this.sphereVel = new THREE.Vector3();
+		this.wheelieNode = null;
+		this.wheelieAmount = 0;
+		this.wheelieActive = false;
+
 
 		this.rigidBody = null;
 		this.physicsWorld = null;
@@ -55,6 +63,7 @@ export class Vehicle {
 		this.spawnPosition = new THREE.Vector3( 3.5, 0.5, 5 );
 		this.spawnAngle = 0;
 		this.topSpeed = 1.0;
+		this.baseTopSpeed = 1.0;
 		this.accelRate = 6.0;
 		this.reverseAccelRate = 2.0;
 		this.brakeRate = 8.0;
@@ -72,6 +81,7 @@ export class Vehicle {
 
 		if ( ! perf ) return;
 		this.topSpeed = perf.topSpeed ?? this.topSpeed;
+		this.baseTopSpeed = this.topSpeed;
 		this.accelRate = perf.accelRate ?? this.accelRate;
 		this.reverseAccelRate = perf.reverseAccelRate ?? this.reverseAccelRate;
 		this.brakeRate = perf.brakeRate ?? this.brakeRate;
@@ -102,7 +112,7 @@ export class Vehicle {
 		this.angularSpeed = 0;
 		this.acceleration = 0;
 		this.modelVelocity.set( 0, 0, 0 );
-		this.container.position.set( this.spherePos.x, this.spherePos.y - 0.5, this.spherePos.z );
+		this.container.position.set( this.spherePos.x, this.spherePos.y - this.hitboxRadius, this.spherePos.z );
 		this.container.rotation.set( 0, this.spawnAngle, 0 );
 		this.container.quaternion.setFromEuler( this.container.rotation );
 		this.prevModelPos.copy( this.container.position );
@@ -154,8 +164,19 @@ export class Vehicle {
 
 			if ( child.isMesh ) {
 
+				// Real castShadow: the sun's depth pass only renders layer 9
+				// (see ShadowProxy.js), so the car must live on it too to be
+				// able to cast its moving shadow every frame.
 				child.castShadow = true;
 				child.receiveShadow = true;
+				child.layers.enable( 9 );
+				// The car model is an OPEN shell (single-surface hood/roof/fender
+				// panels, no closed hull). Three.js depth-passes BACK faces of
+				// FrontSide materials by default, which drops every outward
+				// panel and leaves a hollow "cross-section" shadow. Cast with
+				// both faces so the full outer silhouette lands in the map.
+				const mats = Array.isArray( child.material ) ? child.material : [ child.material ];
+				for ( const m of mats ) if ( m ) m.shadowSide = THREE.DoubleSide;
 				const mat = child.material;
 				if ( mat && mat.isMeshStandardMaterial ) {
 					mat.metalness = Math.max( mat.metalness ?? 0.08, 0.12 );
@@ -166,8 +187,33 @@ export class Vehicle {
 			}
 
 		} );
+		// Wheelie pivot: the rear axle, so boosts pitch the car up about its back wheels.
+		if ( this.wheelBL && this.wheelBR ) {
+			const rearZ = ( this.wheelBL.position.z + this.wheelBR.position.z ) / 2;
+			const pivot = new THREE.Group();
+			pivot.position.set( 0, 0, rearZ );
+			this.modelRoot.position.z += - rearZ;
+			this.wheelieNode = pivot;
+			pivot.add( this.modelRoot );
+			this.container.add( pivot );
+		}
+
 
 	}
+
+		setWheelieActive( active ) {
+			this.wheelieActive = Boolean( active );
+		}
+
+		updateWheelie( dt ) {
+			if ( ! this.modelRoot || ! this.wheelieNode ) return;
+			const target = this.wheelieActive ? 1 : 0;
+			const rate = target > this.wheelieAmount ? 6.5 : 3.5;
+			this.wheelieAmount += ( target - this.wheelieAmount ) * Math.min( 1, dt * rate );
+			const angle = this.wheelieAmount * 0.55;
+			this.wheelieNode.rotation.x = -angle;
+		}
+
 
 	init( model ) {
 
@@ -199,6 +245,9 @@ export class Vehicle {
 
 		this.container.rotateY( this.angularSpeed * dt );
 
+		// Custom-mod "spin car": sustained yaw rate alongside steering.
+		if ( Number.isFinite( this.__modSpin ) ) this.container.rotateY( this.__modSpin * dt );
+
 		_tmpVec.set( 0, 1, 0 ).applyQuaternion( this.container.quaternion );
 
 		if ( _tmpVec.y > 0.5 ) {
@@ -210,17 +259,25 @@ export class Vehicle {
 
 		const targetSpeed = this.inputZ * this.topSpeed;
 
+		// Lerp factors are clamped to 1: stacked pad effects multiply
+		// accelMultiplier (4x pad-high-speed is ~14x), and lerp(a, b, t)
+		// EXTRAPOLATES for t > 1 — so dt * rate * multiplier > 2 amplified
+		// |linearSpeed - target| by (t-1) every frame instead of shrinking
+		// it. Stacked high-speed pads made the speed model oscillate
+		// exponentially (measured: 1.2 -> 14,000,000 in ~3s) and crash the
+		// tab. Clamped, stacks still mean much faster acceleration toward
+		// the pad-boosted top speed — just never overshoot.
 		if ( targetSpeed < 0 && this.linearSpeed > 0.01 ) {
 
-			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, 0.0, dt * this.brakeRate * this.accelMultiplier );
+			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, 0.0, Math.min( 1, dt * this.brakeRate * this.accelMultiplier ) );
 
 		} else if ( targetSpeed < 0 ) {
 
-			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, targetSpeed / 2, dt * this.reverseAccelRate * this.accelMultiplier );
+			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, targetSpeed / 2, Math.min( 1, dt * this.reverseAccelRate * this.accelMultiplier ) );
 
 		} else {
 
-			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, targetSpeed, dt * this.accelRate * this.accelMultiplier );
+			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, targetSpeed, Math.min( 1, dt * this.accelRate * this.accelMultiplier ) );
 
 		}
 
@@ -261,13 +318,17 @@ export class Vehicle {
 
 		if ( this.spherePos.y < - 10 ) {
 
-			this.resetToSpawn();
+			// Host (main.js) wires onOutOfBounds to its full respawn (lap state,
+			// obstacles, camera). Without the callback (editor test drive) fall
+			// back to a plain physics-only reset.
+			if ( this.onOutOfBounds ) this.onOutOfBounds();
+			else this.resetToSpawn();
 
 		}
 
 		this.container.position.set(
 			this.spherePos.x,
-			this.spherePos.y - 0.5,
+			this.spherePos.y - this.hitboxRadius,
 			this.spherePos.z
 		);
 
@@ -280,6 +341,7 @@ export class Vehicle {
 
 		this.updateBody( dt );
 		this.updateWheels( dt );
+		this.updateWheelie( dt );
 		this.applySlopeVisualTilt( dt );
 
 		_forward.set( 0, 0, 1 ).applyQuaternion( this.container.quaternion );
@@ -297,7 +359,58 @@ export class Vehicle {
 		const throttleLoad = Math.abs( this.inputZ ) > 0.45 ? 0.12 : 0;
 		const bodyRollSlip = this.bodyNode ? Math.max( 0, Math.abs( this.bodyNode.rotation.z ) - 0.08 ) * 1.4 : 0;
 		const targetDriftIntensity = Math.max( 0, lateralSlip * 1.35 + steeringLoad * 0.28 + throttleLoad + bodyRollSlip - 0.28 );
-		this.driftIntensity = THREE.MathUtils.lerp( this.driftIntensity, targetDriftIntensity, Math.min( 1, dt * 8 ) );
+		// Custom-mod "set drift" persists: mods store __modDrift and it overrides
+		// the computed target so the value isn't lerped away next frame.
+		const driftTarget = Number.isFinite( this.__modDrift ) ? this.__modDrift : targetDriftIntensity;
+		this.driftIntensity = THREE.MathUtils.lerp( this.driftIntensity, driftTarget, Math.min( 1, dt * 8 ) );
+
+	}
+
+	/**
+	 * Dynamic slope detection (pure math, node-testable).
+	 *
+	 * Given the four downward-ray ground samples taken at the chassis frame —
+	 * depths below the chassis center where each ray hit (all rays share the
+	 * same origin height), or null when that ray missed / was rejected —
+	 * reconstruct the ground normal in car space and decompose it into
+	 * pitch/roll that map DIRECTLY onto modelRoot.rotation.x/z.
+	 *
+	 * Physical convention (locked by test-slope-tilt.mjs, and confirmed by
+	 * live testing — the legacy grid-cell detection was inverted, which is
+	 * why its convention is NOT replicated here):
+	 *   climbing (surface rises along the car's forward axis) → nose UP
+	 *   surface rising toward the car's right → right side UP
+	 */
+	static computeSlopeTiltFromSamples( samples, halfLength = 1.1, halfWidth = 0.65, maxTilt = 1.0 ) {
+
+		const num = ( v ) => Number.isFinite( v ) ? v : null;
+		const forward = num( samples?.forward );
+		const backward = num( samples?.backward );
+		const left = num( samples?.left );
+		const right = num( samples?.right );
+
+		// Surface rise-over-run along the car's forward axis (from depth deltas).
+		let nx = 0, nz = 0;
+		if ( forward != null && backward != null ) {
+
+			nz = - ( backward - forward ) / ( 2 * halfLength );
+
+		}
+
+		if ( left != null && right != null ) {
+
+			nx = ( right - left ) / ( 2 * halfWidth );
+
+		}
+
+		if ( nx === 0 && nz === 0 ) return { pitch: 0, roll: 0 };
+
+		const inv = 1 / Math.hypot( nx, 1, nz );
+		const ny = inv;
+		return {
+			pitch: THREE.MathUtils.clamp( Math.atan2( nz * inv, ny ), - maxTilt, maxTilt ),
+			roll: THREE.MathUtils.clamp( Math.atan2( - nx * inv, ny ), - maxTilt, maxTilt ),
+		};
 
 	}
 
@@ -332,15 +445,25 @@ export class Vehicle {
 
 		if ( ! this.bodyNode ) return;
 
+		// The lean targets below are speed-proportional and were tuned for the
+		// normal ~1.8 top speed (pitch target ~= ls|ls|/24 rad, roll ~= |ls|/5).
+		// Stacked speed pads now drive linearSpeed to 10x+ (#438/#439), which
+		// scaled those targets into full backflips (5.4 rad at a 10-pad stack)
+		// and upside-down rolls while steering. Clamp the TARGETS to their
+		// intended physical lean: normal driving is unchanged, absurd speed
+		// saturates at max lean instead of flipping the body over.
+		const MAX_BODY_PITCH = 0.35;
+		const MAX_BODY_ROLL = 0.38;
+
 		this.bodyNode.rotation.x = lerpAngle(
 			this.bodyNode.rotation.x,
-			-( this.linearSpeed - this.acceleration ) / 6,
+			THREE.MathUtils.clamp( -( this.linearSpeed - this.acceleration ) / 6, -MAX_BODY_PITCH, MAX_BODY_PITCH ),
 			dt * 10
 		);
 
 		this.bodyNode.rotation.z = lerpAngle(
 			this.bodyNode.rotation.z,
-			-( this.inputX / 5 ) * this.linearSpeed,
+			THREE.MathUtils.clamp( -( this.inputX / 5 ) * this.linearSpeed, -MAX_BODY_ROLL, MAX_BODY_ROLL ),
 			dt * 5
 		);
 
@@ -352,7 +475,10 @@ export class Vehicle {
 
 		for ( const wheel of this.wheels ) {
 
-			wheel.rotation.x += this.acceleration;
+			// Modulo keeps per-frame spin under one revolution — at pad-stack
+			// speeds `acceleration` exceeds 2*PI per frame and the raw sum
+			// strobes/aliases instead of reading as fast spin.
+			wheel.rotation.x = ( wheel.rotation.x + this.acceleration ) % ( Math.PI * 2 );
 
 		}
 
@@ -371,4 +497,3 @@ export class Vehicle {
 	}
 
 }
-

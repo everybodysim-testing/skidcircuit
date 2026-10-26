@@ -210,7 +210,7 @@ actionDef( 'action_set_vehicle_spin', 'RAD', 'set vehicle Y rotation (rad)' );
 actionDef( 'action_set_vehicle_scale', 'VALUE', 'set vehicle size scale' );
 actionDefDropdown( 'action_set_vehicle_visible', 'set vehicle visible', 'VIS', [ [ 'visible', '1' ], [ 'hidden', '0' ] ], null, null, VEH );
 actionDef( 'action_set_drift', 'VALUE', 'set drift intensity (0-2)' );
-actionDefDropdown( 'action_set_vehicle_model', 'set vehicle model', 'MODEL', [ [ 'Yellow Truck', 'vehicle-truck-yellow' ], [ 'Green Truck', 'vehicle-truck-green' ], [ 'Purple Van', 'vehicle-truck-purple' ], [ 'Red Truck', 'vehicle-truck-red' ], [ 'Green Hatchback', 'vehicle-hatchback-green' ], [ 'Orange Sedan', 'vehicle-sedan-orange' ], [ 'Police Car', 'vehicle-car-police' ], [ 'Yellow Delivery', 'vehicle-delivery-yellow' ], [ 'Purple Flatbed', 'vehicle-flatbed-purple' ], [ 'Blue Van', 'vehicle-van-blue' ] ], null, null, VEH );
+actionDefDropdown( 'action_set_vehicle_model', 'set vehicle model', 'MODEL', [ [ 'Trail Pickup', 'vehicle-truck-yellow' ], [ 'Utility Pickup', 'vehicle-truck-green' ], [ 'Cargo Van', 'vehicle-truck-purple' ], [ 'Stakebed Truck', 'vehicle-truck-red' ], [ 'Hatchback', 'vehicle-hatchback-green' ], [ 'Sedan', 'vehicle-sedan-orange' ], [ 'Police Car', 'vehicle-car-police' ], [ 'Delivery', 'vehicle-delivery-yellow' ], [ 'Flatbed Truck', 'vehicle-flatbed-purple' ], [ 'Panel Van', 'vehicle-van-blue' ], [ 'Ambulance', 'vehicle-ambulance-red' ], [ 'Fire Truck', 'vehicle-firetruck-red' ], [ 'Taxi', 'vehicle-taxi-yellow' ], [ 'Tractor', 'vehicle-tractor-yellow' ], [ 'Trash Truck', 'vehicle-trash-green' ] ], null, null, VEH );
 
 // ============ CAMERA ============
 actionDef( 'action_camera_shake', 'INT', 'camera shake intensity' );
@@ -230,7 +230,7 @@ Blockly.Blocks.action_set_horizon_color = { init() { this.appendDummyInput().app
 Blockly.Blocks.action_set_particle_color = { init() { this.appendDummyInput().appendField( 'set particle color' ).appendField( new Blockly.FieldColour( '#ff4b1f' ), 'COLOR' ); this.setPreviousStatement( true ); this.setNextStatement( true ); this.setColour( FX ); } };
 Blockly.Blocks.action_flash_screen = { init() { this.appendDummyInput().appendField( 'flash screen' ).appendField( new Blockly.FieldColour( '#ffffff' ), 'COLOR' ); this.setPreviousStatement( true ); this.setNextStatement( true ); this.setColour( FX ); } };
 actionDef( 'action_set_sky_vibrance', 'VALUE', 'set sky vibrance (0-1)', FX );
-actionDefDropdown( 'action_set_sky_palette', 'set sky/weather palette', 'PRESET', [ [ 'Clear', 'clear' ], [ 'Cloudy', 'cloudy' ], [ 'Sunset', 'sunset' ], [ 'Night', 'night' ], [ 'Dawn Mist', 'dawn-mist' ] ], null, null, FX );
+actionDefDropdown( 'action_set_sky_palette', 'set sky/weather palette', 'PRESET', [ [ 'Clear', 'clear' ], [ 'Cloudy', 'cloudy' ], [ 'Sunset', 'sunset' ], [ 'Night', 'night' ], [ 'Night (Constellations)', 'night-constellations' ], [ 'Dawn Mist', 'dawn-mist' ] ], null, null, FX );
 actionDef( 'action_set_sun_intensity', 'VALUE', 'set sun intensity', FX );
 actionDef( 'action_set_hemi_intensity', 'VALUE', 'set ambient light', FX );
 actionDef( 'action_set_exposure', 'VALUE', 'set exposure', FX );
@@ -518,7 +518,7 @@ actionDef( 'action_set_master_volume', 'VALUE', 'set master volume (0-1)', AUD )
 actionDef( 'action_restart_race', null, 'restart race', FLOW );
 actionDef( 'action_teleport_to_spawn', null, 'teleport to spawn', FLOW );
 actionDef( 'action_add_lap_time_penalty', 'SECS', 'add time penalty (seconds)', FLOW );
-actionDefDropdown( 'action_set_weather', 'set weather', 'W', [ [ 'Clear', 'clear' ], [ 'Cloudy', 'cloudy' ], [ 'Sunset', 'sunset' ], [ 'Night', 'night' ], [ 'Dawn Mist', 'dawn-mist' ] ], null, null, FX );
+actionDefDropdown( 'action_set_weather', 'set weather', 'W', [ [ 'Clear', 'clear' ], [ 'Cloudy', 'cloudy' ], [ 'Sunset', 'sunset' ], [ 'Night', 'night' ], [ 'Night (Constellations)', 'night-constellations' ], [ 'Dawn Mist', 'dawn-mist' ] ], null, null, FX );
 actionDef( 'action_set_fog_color_rgb', 'VALUE', 'tint world (0-1)', FX );
 
 // ---- EVENTS (extended, derived in the generated runtime) ----

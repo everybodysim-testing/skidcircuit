@@ -109,17 +109,19 @@
 - Ghost/replay payloads carry `car`; imported ghosts normalize and re-render the matching model.
 - Custom mods can call `api.setVehicleModel(key)` (validates against CAR_STATS + models).
 
-### Current car roster (10 cars, all unified stats)
+### Current car roster (15 cars, all unified stats)
 - Original 4: `vehicle-truck-yellow` (Yellow Truck), `vehicle-truck-green` (Green Truck),
   `vehicle-truck-purple` (Purple Van), `vehicle-truck-red` (Red Truck).
 - Batch 2: `vehicle-hatchback-green` (Green Hatchback), `vehicle-sedan-orange` (Orange Sedan).
 - Batch 3: `vehicle-car-police` (Police Car), `vehicle-delivery-yellow` (Yellow Delivery),
   `vehicle-flatbed-purple` (Purple Flatbed), `vehicle-van-blue` (Blue Van).
+- Batch 4: `vehicle-ambulance-red` (Ambulance), `vehicle-firetruck-red` (Fire Truck},
+  `vehicle-taxi-yellow` (Taxi), `vehicle-tractor-yellow` (Tractor), `vehicle-trash-green` (Trash Truck}.
 - Naming convention: `[Color] [Model]` (e.g. "Yellow Truck", "Purple Van", "Police Car").
   Police Car has no color prefix (it's a distinct livery). All share identical perf
   (topSpeed 1.12, accelRate 4.8, driveForce 95.0). The `car-select` dropdown options are
   overridden at runtime to `stats.name` (main.js ~line 5997), so HTML option text is a fallback.
-- Garage card grid: `repeat(5, minmax(0,1fr))` → 2×5 grid for 10 cars. Responsive: 3 cols
+- Garage card grid: `repeat(5, minmax(0,1fr))` → 3×5 grid for 15 cars. Responsive: 3 cols
   <1200px, 2 cols <720px. Mobile forces 2 cols.
 
 ## Car painter / Paint Shop (garage) — 3D click-to-fill (`js/main.js` + `index.html`)
@@ -338,10 +340,31 @@
 - The old `.garage-vehicle-card dl/dt/dd` and `.garage-vehicle-status` rules were
   removed (no longer emitted by `renderGarageVehicleCards`).
 
-## Physics: car is a rolling sphere (`js/Physics.js` + `js/Vehicle.js`)
+## Boost wheelie animation (`js/Vehicle.js` + `js/main.js`)
 
-### Drive model (critical for surface friction tuning)
-- The car is a single crashcat sphere (radius `VEHICLE_SURFACE_RADIUS` 0.5, friction 5.0).
+- When a boost is applied (arcade-boost button, boost pads, wood surfaces`applyBoostFor`),the
+  car pitches up about its rear axle like a wheelie. `applyBoostFor()` calls
+  `targetVehicle.setWheelieActive?.( true )`; `updateActiveBoost()` calls
+  `.setWheelieActive?.( false )` when the boost elapses (now >= boostActiveUntil). Respawn/
+  lap-reset sites zere boostActiveUntil also call `.setWheelieActive?.( false )` so the
+  car doesn't stay popped.
+
+### Vehicle.js side
+- Constructor fields:`wheelieNode` / `wheelieAmount` / `wheelieActive`
+  (defaults null / 0 / false).
+- `attachModel()` builds the wheelie pivot: a `THREE.Group` positioned at the REAR
+  axle z (`( wheelBL.position.z + wheelBR.position.z ) / 2`, computed at runtime from
+  the wheel node translations — NO per-car table. The cloned modelRoot is re-parented
+  under the pivot and its position.z shifte the opposite way (-rearZ, so the whole car
+  visually stays exactly in place (identity net transform when not wheeling).
+- `updateWheelie( dt )` lerps `wheelieAmount` → 1 (fast, 6.5/s) when active /
+  → 0 (slow, 3.5/s) when not,and applies `-wheelieAmount * 0.55` pitch to
+  `wheelieNode.rotation.x` (so the car lifts its nose off the ground about its back wheels.
+.
+- `update()` calls `this.updateWheelie( dt )` after `updateWheels( dt )`.
+- Wired generically for ALL vehicles (the pivot math uses each vehicle's own rear wheels),
+  including the 5 newest (ambulance, firetruck, taxi, tractor, trash truck.
+- The car is a single crashcat sphere(radius `VEHICLE_SURFACE_RADIUS` 0.5, friction  5.0).
 - It moves by ROLLING: `Vehicle.update()` applies ANGULAR velocity around the right
   axis (`rigidBody.setAngularVelocity(... angvel + _right * drive)`). Surface friction
   converts that rolling into linear (forward) motion.
@@ -1288,3 +1311,24 @@ The mobile UI had two independent triggers; BOTH are neutralized:
   `test-public-servers-fixes.mjs` / `test-pubsrv-logic.mjs` /
   `test-pubsrv-round-flow.mjs` tested the removed round/rotation/rankings model
   and were deleted.)
+
+
+## Public-server poll kick lives INSIDE init() (not module scope)
+
+- `js/main.js` `startPublicServerPolling()` is a local closure declared near the end of `async function init()` (right after `syncMultiplayerTransforms`), because it `await`s that init-local function. A module-scope copy would ReferenceError(TDZ/undefined) — do NOT hoist it out.
+- It is kicked in TWO places: M-bM-^@M-^B at init() tail (`if ( hasFirebaseMultiplayerConfig() && publicServerState.serverId ) startPublicServerPolling();`),M-bM-^@M-^B right after a successful Firebase public-server join (`joinPublicServer()` calls `await startPublicServerPolling().catch(...)` before the try-catch's catch). The kick performs an immediate `syncMultiplayerTransforms({force:true})` so the room roster + host map reach the joiner without waiting for the 220ms interval, and the host meta PATCH fires right away (cadence `lastPublicServerRoomMetaSyncAt`, separate from the private-room `lastHostRoomMetaSyncAt`).
+- `broadcastPeerState()` now skips echoing every 33ms to Firebase when WebRTC data channels are live: it stamps `multiplayerSessionState.peerBroadcastLastFirebaseAt` when `connections.size>0` and Firebase PUTs only every `REMOTE_SYNC_MS`(220ms)。 This cut the lag (zero chatty PUT per frame worried) while keeping the per-frame packets to peers;when no data channel is open the old every-tick Firebase PUT path is preserved so private rooms still sync via the HTTPS floor。
+
+## Pre-push syntax sweep — MODULE goal, not just node --check
+
+`node --check foo.js` parses in the CommonJS SCRIPT goal, but the browser loads
+every `js/*.js` as an ES MODULE (import map). Some syntax is legal in one goal
+and not the other — `cam2?.prop = x` (optional chaining as assignment target)
+passed `node --check` but crashed the browser with "Invalid left-hand side in
+assignment". ALWAYS sweep in the module goal before pushing:
+
+```bash
+for f in js/*.js mods/*.js; do cp "$f" "/tmp/chk.mjs"; node --check /tmp/chk.mjs || echo "FAIL: $f"; done
+```
+
+(Never use optional chaining on the left side of `=`. `if ( x ) x.prop = v;`.)
